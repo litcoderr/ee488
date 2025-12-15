@@ -55,7 +55,11 @@ def _load_from_csv(
 
 
 def _load_from_yfinance(
-    tickers: Iterable[str], start_date: str, end_date: str
+    tickers: Iterable[str],
+    start_date: str,
+    end_date: str,
+    interval: str = "1d",
+    auto_adjust: bool = False,
 ) -> Dict[str, pd.DataFrame]:
     try:
         import yfinance as yf
@@ -65,7 +69,7 @@ def _load_from_yfinance(
     data = {}
     for t in tickers:
         ticker = yf.Ticker(t)
-        df = ticker.history(interval="1d", start=start_date, end=end_date, auto_adjust=False)
+        df = ticker.history(interval=interval, start=start_date, end=end_date, auto_adjust=auto_adjust)
         if df.empty:
             raise RuntimeError(f"No data returned from yfinance for {t}")
         df = df[["Open", "High", "Low", "Close", "Volume"]]
@@ -80,6 +84,8 @@ def load_price_data(
     source: str = "yfinance",
     data_dir: Optional[str] = None,
     rng: Optional[np.random.Generator] = None,
+    interval: str = "1d",
+    auto_adjust: bool = False,
 ) -> Dict[str, pd.DataFrame]:
     if rng is None:
         rng = np.random.default_rng()
@@ -92,5 +98,41 @@ def load_price_data(
             raise ValueError("data_dir is required when source='csv'")
         return _load_from_csv(tickers, data_dir, start_date, end_date)
     if source == "yfinance":
-        return _load_from_yfinance(tickers, start_date, end_date)
+        return _load_from_yfinance(
+            tickers, start_date, end_date, interval=interval, auto_adjust=auto_adjust
+        )
     raise ValueError(f"Unknown data source '{source}'")
+
+
+def download_yfinance_csv(
+    tickers: Iterable[str],
+    start_date: str,
+    end_date: str,
+    data_dir: str,
+    interval: str = "1d",
+    auto_adjust: bool = False,
+    overwrite: bool = False,
+) -> Dict[str, Path]:
+    """Fetch prices from yfinance and persist each ticker as ``<data_dir>/<ticker>.csv``."""
+    cleaned = [t.strip().upper() for t in tickers if t and t.strip()]
+    if not cleaned:
+        raise ValueError("At least one ticker is required")
+
+    base = Path(data_dir)
+    base.mkdir(parents=True, exist_ok=True)
+
+    data = _load_from_yfinance(
+        cleaned, start_date=start_date, end_date=end_date, interval=interval, auto_adjust=auto_adjust
+    )
+    saved: Dict[str, Path] = {}
+    for t, df in data.items():
+        frame = df.copy()
+        if frame.index.tz is not None:
+            frame.index = frame.index.tz_localize(None)
+        frame.index.name = "Date"
+        path = base / f"{t}.csv"
+        if path.exists() and not overwrite:
+            raise FileExistsError(f"File already exists: {path}. Use overwrite=True to replace it.")
+        frame.sort_index().to_csv(path)
+        saved[t] = path
+    return saved

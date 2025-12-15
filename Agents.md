@@ -1,3 +1,6 @@
+# Implementation Instructions
+- If you have any ambiguity while implementation, always ask the user for clarification
+
 # Project Instructions
 
 # Assignment: Stock Trading

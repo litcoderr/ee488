@@ -37,6 +37,15 @@ python train.py --mode eval --algo dqn \
   --test-start 2023-01-01 --test-end 2023-12-31 --eval-episodes 5
 ```
 
+## Download Real Data to CSV
+- Grab offline CSVs once, then point training at them with `--source csv --data-dir ./data` to avoid repeated API calls.
+- Example:
+```
+python collect_data.py --tickers AAPL,MSFT,GOOG,AMZN \
+  --start-date 2018-01-01 --end-date 2024-12-31 \
+  --data-dir ./data --interval 1d --auto-adjust
+```
+
 ## Key Arguments
 - `--algo {dqn,ppo}`: choose algorithm.
 - `--mode {train,eval}`: train or evaluate an existing checkpoint.
