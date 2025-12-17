@@ -1,0 +1,2 @@
+bash eval_single_aapl_seen_dqn.sh
+bash eval_single_aapl_unseen_dqn.sh

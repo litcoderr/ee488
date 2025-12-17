@@ -241,35 +241,42 @@ class PPOAgent:
         else:
             std = torch.exp(self.ac.module.log_std if isinstance(self.ac, nn.parallel.DistributedDataParallel) else self.ac.log_std)
             dist_norm = torch.distributions.Normal(logits, std)
-            action = dist_norm.sample()
-            logprob = dist_norm.log_prob(action).sum(-1)
-            action_np = action.squeeze(0).cpu().numpy()
+            raw_action = dist_norm.sample()
+            squashed = torch.tanh(raw_action)
+            # log prob correction for tanh squashing
+            logprob = dist_norm.log_prob(raw_action) - torch.log(1 - squashed.pow(2) + 1e-8)
+            logprob = logprob.sum(-1)
+            action_np = squashed.squeeze(0).cpu().numpy()
         if not explore:
             if self.discrete:
                 action_np = int(torch.argmax(logits, dim=-1).item())
                 probs = torch.distributions.Categorical(logits=logits)
                 logprob = probs.log_prob(torch.tensor(action_np, device=self.device))
             else:
-                action_np = logits.detach().squeeze(0).cpu().numpy()
+                squashed = torch.tanh(logits.detach())
+                action_np = squashed.squeeze(0).cpu().numpy()
                 std = torch.exp(
                     self.ac.module.log_std if isinstance(self.ac, nn.parallel.DistributedDataParallel) else self.ac.log_std
                 )
                 dist_norm = torch.distributions.Normal(logits, std)
-                logprob = dist_norm.log_prob(torch.as_tensor(action_np, device=self.device)).sum(-1)
-        return action_np, logprob.detach().cpu().numpy(), value.detach().cpu().numpy()
+                raw_action = torch.atanh(torch.as_tensor(action_np, device=self.device))
+                logprob = dist_norm.log_prob(raw_action) - torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-8)
+                logprob = logprob.sum(-1)
+        return action_np, float(logprob.detach().cpu().item()), float(value.detach().cpu().item())
 
     def store(self, obs, action, reward, done, logprob, value):
         self.buffer["obs"].append(flatten_observation(obs))
         self.buffer["actions"].append(action)
-        self.buffer["rewards"].append(reward)
-        self.buffer["dones"].append(done)
-        self.buffer["logprobs"].append(logprob)
-        self.buffer["values"].append(value)
+        self.buffer["rewards"].append(float(reward))
+        self.buffer["dones"].append(float(done))
+        self.buffer["logprobs"].append(float(logprob))
+        self.buffer["values"].append(float(value))
 
     def _compute_advantages(self, next_value: float):
-        rewards = np.array(self.buffer["rewards"], dtype=np.float32)
-        dones = np.array(self.buffer["dones"], dtype=np.float32)
-        values = np.array(self.buffer["values"], dtype=np.float32).squeeze(-1)
+        # Flatten to 1D to avoid shape/broadcast surprises
+        rewards = np.array(self.buffer["rewards"], dtype=np.float32).reshape(-1)
+        dones = np.array(self.buffer["dones"], dtype=np.float32).reshape(-1)
+        values = np.array(self.buffer["values"], dtype=np.float32).reshape(-1)
         adv = np.zeros_like(rewards)
         last_gae = 0.0
         for t in reversed(range(len(rewards))):
